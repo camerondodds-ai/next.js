@@ -252,8 +252,7 @@ impl StaticSortedFile {
             let GetKeyEntryResult {
                 hash: mid_hash,
                 key: mid_key,
-                ty,
-                val: mid_val,
+                ..
             } = get_key_entry(offsets, entries, entry_count, m, hash_len)?;
 
             let comparison = compare_hash_key(mid_hash, mid_key, key_hash, key);
