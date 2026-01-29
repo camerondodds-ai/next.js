@@ -164,18 +164,16 @@ impl StaticSortedFile {
         let this = &self;
         let mut current_block = this.meta.block_count - 1;
         loop {
-            let key_block_arc = this.get_key_block(current_block, key_block_cache)?;
-            let mut block_data = &key_block_arc[..];
-            let block_type = block_data.read_u8()?;
+            let mut key_block_arc = this.get_key_block(current_block, key_block_cache)?;
+            let block_type = key_block_arc.read_u8()?;
             match block_type {
                 BLOCK_TYPE_INDEX => {
-                    current_block = this.lookup_index_block(block_data, key_hash)?;
+                    current_block = this.lookup_index_block(&key_block_arc, key_hash)?;
                 }
                 BLOCK_TYPE_KEY_WITH_HASH | BLOCK_TYPE_KEY_NO_HASH => {
                     let has_hash = block_type == BLOCK_TYPE_KEY_WITH_HASH;
                     return self.lookup_key_block(
-                        key_block_arc.clone(),
-                        block_data,
+                        key_block_arc,
                         key_hash,
                         key,
                         has_hash,
@@ -242,8 +240,7 @@ impl StaticSortedFile {
     /// If `find_all` is true, collects all entries with the same key.
     fn lookup_key_block<K: QueryKey>(
         &self,
-        key_block_arc: ArcSlice<u8>,
-        mut block: &[u8],
+        mut key_block_arc: ArcSlice<u8>,
         key_hash: u64,
         key: &K,
         has_hash: bool,
@@ -251,9 +248,10 @@ impl StaticSortedFile {
         find_all: bool,
     ) -> Result<SstLookupResult> {
         let hash_len: u8 = if has_hash { 8 } else { 0 };
-        let entry_count = block.read_u24::<BE>()? as usize;
-        let offsets = &block[..entry_count * 4];
-        let entries = &block[entry_count * 4..];
+        let entry_count = key_block_arc.read_u24::<BE>()? as usize;
+        // After reading, key_block_arc now points past the header
+        let offsets = &key_block_arc[..entry_count * 4];
+        let entries = &key_block_arc[entry_count * 4..];
 
         let mut l = 0;
         let mut r = entry_count;
