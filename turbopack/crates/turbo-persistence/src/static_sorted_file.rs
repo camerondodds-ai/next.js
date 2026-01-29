@@ -17,6 +17,7 @@ use crate::{
     QueryKey,
     arc_slice::ArcSlice,
     compression::decompress_into_arc,
+    constants::MAX_INLINE_VALUE_SIZE,
     lookup_entry::{LazyLookupValue, LookupEntry, LookupValue},
 };
 
@@ -35,6 +36,15 @@ pub const KEY_BLOCK_ENTRY_TYPE_BLOB: u8 = 1;
 pub const KEY_BLOCK_ENTRY_TYPE_DELETED: u8 = 2;
 /// The tag for a medium-sized value.
 pub const KEY_BLOCK_ENTRY_TYPE_MEDIUM: u8 = 3;
+/// The minimum tag for inline values. The actual size is (tag - INLINE_MIN).
+pub const KEY_BLOCK_ENTRY_TYPE_INLINE_MIN: u8 = 8;
+
+// Static assertion: MAX_INLINE_VALUE_SIZE must fit in the key type encoding.
+// Key types 8-255 encode inline values of size 0-247, so max is 255 - 8 = 247.
+const _: () = assert!(
+    MAX_INLINE_VALUE_SIZE <= (u8::MAX - KEY_BLOCK_ENTRY_TYPE_INLINE_MIN) as usize,
+    "MAX_INLINE_VALUE_SIZE exceeds what can be encoded in key type byte"
+);
 
 /// The result of a lookup operation.
 pub enum SstLookupResult {
@@ -154,17 +164,18 @@ impl StaticSortedFile {
         let this = &self;
         let mut current_block = this.meta.block_count - 1;
         loop {
-            let block = this.get_key_block(current_block, key_block_cache)?;
-            let mut block = &block[..];
-            let block_type = block.read_u8()?;
+            let key_block_arc = this.get_key_block(current_block, key_block_cache)?;
+            let mut block_data = &key_block_arc[..];
+            let block_type = block_data.read_u8()?;
             match block_type {
                 BLOCK_TYPE_INDEX => {
-                    current_block = this.lookup_index_block(block, key_hash)?;
+                    current_block = this.lookup_index_block(block_data, key_hash)?;
                 }
                 BLOCK_TYPE_KEY_WITH_HASH | BLOCK_TYPE_KEY_NO_HASH => {
                     let has_hash = block_type == BLOCK_TYPE_KEY_WITH_HASH;
                     return self.lookup_key_block(
-                        block,
+                        key_block_arc.clone(),
+                        block_data,
                         key_hash,
                         key,
                         has_hash,
@@ -231,6 +242,7 @@ impl StaticSortedFile {
     /// If `find_all` is true, collects all entries with the same key.
     fn lookup_key_block<K: QueryKey>(
         &self,
+        key_block_arc: ArcSlice<u8>,
         mut block: &[u8],
         key_hash: u64,
         key: &K,
@@ -277,9 +289,9 @@ impl StaticSortedFile {
 
         // Collect all entries with matching key starting from l
         let mut results = SmallVec::new();
-        results.push(self.handle_key_match(ty, val, value_block_cache)?);
+        results.push(self.handle_key_match(ty, val, &key_block_arc, value_block_cache)?);
         if find_all {
-            // duplicates, if there are anyu will be immediately following this one.
+            // duplicates, if there are any will be immediately following this one.
             for i in (l + 1)..entry_count {
                 let GetKeyEntryResult {
                     hash,
@@ -291,7 +303,7 @@ impl StaticSortedFile {
                 if comparison != Ordering::Equal {
                     break;
                 }
-                results.push(self.handle_key_match(ty, val, value_block_cache)?);
+                results.push(self.handle_key_match(ty, val, &key_block_arc, value_block_cache)?);
             }
         }
 
@@ -303,6 +315,7 @@ impl StaticSortedFile {
         &self,
         ty: u8,
         mut val: &[u8],
+        key_block_arc: &ArcSlice<u8>,
         value_block_cache: &BlockCache,
     ) -> Result<LookupValue> {
         Ok(match ty {
@@ -325,6 +338,15 @@ impl StaticSortedFile {
                 LookupValue::Blob { sequence_number }
             }
             KEY_BLOCK_ENTRY_TYPE_DELETED => LookupValue::Deleted,
+            ty if ty >= KEY_BLOCK_ENTRY_TYPE_INLINE_MIN => {
+                // Inline value: size = ty - INLINE_MIN
+                // Create a zero-copy slice into the key block
+                let inline_size = (ty - KEY_BLOCK_ENTRY_TYPE_INLINE_MIN) as usize;
+                let inline_slice = &val[..inline_size];
+                // SAFETY: inline_slice points into key_block_arc's data
+                let value = unsafe { key_block_arc.slice_from_subslice(inline_slice) };
+                LookupValue::Slice { value }
+            }
             _ => {
                 bail!("Invalid key block entry type");
             }
@@ -563,15 +585,15 @@ impl<'l> StaticSortedFileIter<'l> {
                         block,
                     }
                 } else {
-                    let value = self
-                        .this
-                        .handle_key_match(ty, val, self.value_block_cache)?;
+                    let value =
+                        self.this
+                            .handle_key_match(ty, val, &entries, self.value_block_cache)?;
                     LazyLookupValue::Eager(value)
                 };
                 let entry = LookupEntry {
                     hash: full_hash,
-                    // Safety: The key is a valid slice of the entries.
-                    key: unsafe { ArcSlice::new_unchecked(key, ArcSlice::full_arc(&entries)) },
+                    // SAFETY: key points into entries which is backed by the same Arc
+                    key: unsafe { entries.slice_from_subslice(key) },
                     value,
                 };
                 if index + 1 < entry_count {
@@ -684,6 +706,16 @@ fn get_key_entry<'l>(
             ty,
             val: &[],
         },
+        ty if ty >= KEY_BLOCK_ENTRY_TYPE_INLINE_MIN => {
+            // Inline value: size = ty - INLINE_MIN
+            let inline_size = (ty - KEY_BLOCK_ENTRY_TYPE_INLINE_MIN) as usize;
+            GetKeyEntryResult {
+                hash,
+                key: &entries[start + hash_len_usize..end - inline_size],
+                ty,
+                val: &entries[end - inline_size..end],
+            }
+        }
         _ => {
             bail!("Invalid key block entry type");
         }
