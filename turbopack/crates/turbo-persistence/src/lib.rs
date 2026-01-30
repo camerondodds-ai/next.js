@@ -59,6 +59,11 @@ pub struct FamilyConfig {
 
     /// How to handle duplicate keys during compaction
     pub deduplication_mode: DeduplicationMode,
+
+    /// Whether to attempt LZ4 compression on blocks.
+    /// - `true` (default): Attempt compression, but fall back to uncompressed if it doesn't help
+    /// - `false`: Never attempt compression (saves CPU for incompressible data like hashes)
+    pub try_compress: bool,
 }
 
 impl Default for FamilyConfig {
@@ -67,6 +72,7 @@ impl Default for FamilyConfig {
             max_entries_per_initial_file: MAX_ENTRIES_PER_INITIAL_FILE,
             data_threshold_per_initial_file: DATA_THRESHOLD_PER_INITIAL_FILE,
             deduplication_mode: DeduplicationMode::ByKeyOnly,
+            try_compress: true,
         }
     }
 }

@@ -72,6 +72,9 @@ impl KeySpace {
                 // We need to gracefully handle hash collisions, so only deduplicate if both key and
                 // value are identical
                 deduplication_mode: DeduplicationMode::ByKeyAndValue,
+                // TaskCache stores 8-byte hash keys and 4-byte TaskId values - incompressible
+                // random data. Skip compression to save CPU.
+                try_compress: false,
                 ..Default::default()
             },
         }

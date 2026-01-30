@@ -64,10 +64,23 @@ The SST file contains only data without any header.
 
 - serialized key Compression Dictionary
 - foreach block
-  - 4 bytes uncompressed block length
-  - compressed data
+  - 4 bytes block header (uncompressed length or sentinel)
+  - block data (compressed or uncompressed)
 - foreach block
   - 4 bytes end of block offset relative to start of all blocks
+
+#### Block Compression
+
+Blocks can be stored compressed (LZ4) or uncompressed. The 4-byte header distinguishes them:
+
+- **Header > 0**: Block is LZ4 compressed. Header value is the uncompressed length.
+- **Header = 0**: Block is stored uncompressed (sentinel value). Actual length is derived from block offsets.
+
+This allows per-family compression control via `FamilyConfig::try_compress`:
+- `try_compress: true` (default): Attempt LZ4 compression, but fall back to uncompressed if compression doesn't reduce size
+- `try_compress: false`: Never attempt compression (useful for incompressible data like hashes)
+
+When `try_compress` is false, the compression dictionary is also skipped (written as zero length).
 
 #### Index Block
 

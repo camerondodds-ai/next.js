@@ -1021,6 +1021,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                     path: &Path,
                                     seq: u32,
                                     flags: MetaEntryFlags,
+                                    try_compress: bool,
                                 ) -> Result<(u32, File, StaticSortedFileBuilderMeta<'static>)>
                                 {
                                     let _span =
@@ -1031,6 +1032,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                             total_key_size,
                                             &path.join(format!("{seq:08}.sst")),
                                             flags,
+                                            try_compress,
                                         )
                                     })?;
                                     Ok((seq, file, meta))
@@ -1135,6 +1137,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                                         path,
                                                         seq,
                                                         flags,
+                                                        family_config.try_compress,
                                                     )?);
 
                                                     collector.entries.clear();
@@ -1184,6 +1187,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                             path,
                                             seq,
                                             flags,
+                                            family_config.try_compress,
                                         )?);
                                     } else
                                     // If we have two sets of entries left, merge them and
@@ -1213,6 +1217,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                             path,
                                             seq1,
                                             flags,
+                                            family_config.try_compress,
                                         )?);
 
                                         keys_written += part2.len() as u64;
@@ -1223,6 +1228,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                             path,
                                             seq2,
                                             flags,
+                                            family_config.try_compress,
                                         )?);
                                     }
                                 }

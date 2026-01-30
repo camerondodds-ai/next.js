@@ -9,6 +9,11 @@ pub fn decompress_into_arc(
     compression_dictionary: Option<&[u8]>,
     _long_term: bool,
 ) -> Result<Arc<[u8]>> {
+    // Sentinel: uncompressed_length = 0 means block is stored uncompressed
+    if uncompressed_length == 0 {
+        return Ok(Arc::from(block));
+    }
+
     // We directly allocate the buffer in an Arc to avoid copying it into an Arc and avoiding
     // double indirection. This is a dynamically sized arc.
     let buffer: Arc<[MaybeUninit<u8>]> = Arc::new_zeroed_slice(uncompressed_length as usize);

@@ -473,12 +473,19 @@ impl<K: StoreKey + Send + Sync, S: ParallelScheduler, const FAMILIES: usize>
     ) -> Result<(u32, File)> {
         let (entries, total_key_size) = collector_data;
         let seq = self.current_sequence_number.fetch_add(1, Ordering::SeqCst) + 1;
+        let try_compress = self.family_configs[family as usize].try_compress;
 
         let path = self.db_path.join(format!("{seq:08}.sst"));
         let (meta, file) = self
             .parallel_scheduler
             .block_in_place(|| {
-                write_static_stored_file(entries, total_key_size, &path, MetaEntryFlags::FRESH)
+                write_static_stored_file(
+                    entries,
+                    total_key_size,
+                    &path,
+                    MetaEntryFlags::FRESH,
+                    try_compress,
+                )
             })
             .with_context(|| format!("Unable to write SST file {seq:08}.sst"))?;
 

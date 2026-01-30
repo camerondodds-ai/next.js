@@ -110,6 +110,7 @@ pub fn write_static_stored_file<E: Entry>(
     total_key_size: usize,
     file: &Path,
     flags: MetaEntryFlags,
+    try_compress: bool,
 ) -> Result<(StaticSortedFileBuilderMeta<'static>, File)> {
     debug_assert!(entries.iter().map(|e| e.key_hash()).is_sorted());
 
@@ -119,10 +120,14 @@ pub fn write_static_stored_file<E: Entry>(
     // We use a shared buffer for all operations to avoid excessive allocations
     let mut buffer = Vec::with_capacity(capacity);
 
-    let key_dict = compute_key_compression_dictionary(entries, total_key_size, &mut buffer)?;
+    let key_dict = if try_compress {
+        compute_key_compression_dictionary(entries, total_key_size, &mut buffer)?
+    } else {
+        Vec::new()
+    };
     file.write_all(&key_dict)?;
 
-    let mut block_writer = BlockWriter::new(&mut file, &mut buffer);
+    let mut block_writer = BlockWriter::new(&mut file, &mut buffer, try_compress);
 
     // Another shared buffer for the uncompressed blocks
     // The existing shared buffer will be used for compressed blocks
@@ -223,14 +228,16 @@ struct BlockWriter<'l> {
     buffer: &'l mut Vec<u8>,
     block_offsets: Vec<u32>,
     writer: &'l mut BufWriter<File>,
+    try_compress: bool,
 }
 
 impl<'l> BlockWriter<'l> {
-    fn new(writer: &'l mut BufWriter<File>, buffer: &'l mut Vec<u8>) -> Self {
+    fn new(writer: &'l mut BufWriter<File>, buffer: &'l mut Vec<u8>, try_compress: bool) -> Self {
         Self {
             buffer,
             block_offsets: Vec::new(),
             writer,
+            try_compress,
         }
     }
 
@@ -273,9 +280,24 @@ impl<'l> BlockWriter<'l> {
     }
 
     fn write_block(&mut self, block: &[u8], dict: Option<&[u8]>, long_term: bool) -> Result<()> {
-        let uncompressed_size = block.len().try_into().unwrap();
-        self.compress_block_into_buffer(block, dict, long_term)?;
-        let len = (self.buffer.len() + 4).try_into().unwrap();
+        let uncompressed_size: u32 = block.len().try_into().unwrap();
+
+        // Determine if we should write compressed or uncompressed
+        let (header, data_to_write): (u32, &[u8]) = if self.try_compress {
+            self.compress_block_into_buffer(block, dict, long_term)?;
+            // Compression helped - use compressed data, this is the common case
+            if self.buffer.len() < block.len() {
+                (uncompressed_size, self.buffer.as_slice())
+            } else {
+                // Compression didn't help - use uncompressed with sentinel size value
+                (0, block)
+            }
+        } else {
+            // Never try compression - write uncompressed directly
+            (0, block)
+        };
+
+        let len: u32 = (data_to_write.len() + 4).try_into().unwrap();
         let offset = self
             .block_offsets
             .last()
@@ -286,11 +308,11 @@ impl<'l> BlockWriter<'l> {
         self.block_offsets.push(offset);
 
         self.writer
-            .write_u32::<BE>(uncompressed_size)
-            .context("Failed to write uncompressed size")?;
+            .write_u32::<BE>(header)
+            .context("Failed to write block header")?;
         self.writer
-            .write_all(self.buffer)
-            .context("Failed to write compressed block")?;
+            .write_all(data_to_write)
+            .context("Failed to write block data")?;
         self.buffer.clear();
         Ok(())
     }
