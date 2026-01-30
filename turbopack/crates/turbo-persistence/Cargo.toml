@@ -40,5 +40,9 @@ rand = { workspace = true, features = ["small_rng"] }
 rayon = { workspace = true }
 tempfile = { workspace = true }
 
+[[bin]]
+name = "sst_inspect"
+path = "src/bin/sst_inspect.rs"
+
 [lints]
 workspace = true
