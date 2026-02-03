@@ -1088,6 +1088,10 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
              encode_data: bool,
              buffer: &mut TurboBincodeBuffer| {
                 if task_id.is_transient() {
+                    debug_assert!(
+                        false,
+                        "We should never attempt to snapshot transient tasks: {task_id}: {inner:?}"
+                    );
                     return SnapshotItem {
                         task_id,
                         meta: None,
@@ -1160,6 +1164,8 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
 
         let snapshot = self.storage.take_snapshot(&process, &process_snapshot);
 
+        // We peak all the iterators to avoid calling into the persistence layer if everything is
+        // empty.
         let task_snapshots = snapshot
             .into_iter()
             .filter_map(|iter| {
