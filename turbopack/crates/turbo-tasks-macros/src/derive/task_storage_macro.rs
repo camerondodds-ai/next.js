@@ -1662,18 +1662,13 @@ fn generate_autoset_ops(field: &FieldInfo) -> TokenStream {
 
     // Remove uses find_lazy_mut for lazy to avoid allocation.
     // Track modification before mutating to ensure snapshot captures pre-mutation state.
-    // Remove uses find_lazy_mut for lazy to avoid allocation.
-    // Track modification before mutating to ensure snapshot captures pre-mutation state.
     let remove_body = if is_option {
         let extractor = field.lazy_extractor_closure();
 
         quote! {
             // Track before mutation to ensure snapshot captures pre-mutation state
             #track_modification
-            let Some(set) = self.typed_mut().find_lazy_mut(#extractor) else {
-                return false;
-            };
-            set.remove(item)
+            self.typed_mut().find_lazy_mut(#extractor).is_some_and(|set| set.remove(item))
         }
     } else {
         quote! {
@@ -1713,8 +1708,7 @@ fn generate_autoset_ops(field: &FieldInfo) -> TokenStream {
             #check_access
             // Track before mutation to ensure snapshot captures pre-mutation state
             #track_modification
-            #mut_expr.insert(item);
-            true
+            #mut_expr.insert(item)
         }
 
         #[doc = "Add multiple items to the set from an iterator."]
@@ -1836,17 +1830,11 @@ fn generate_countermap_ops(field: &FieldInfo) -> TokenStream {
     let remove_body = if is_option {
         let extractor = field.lazy_extractor_closure();
         quote! {
-            // Track before mutation to ensure snapshot captures pre-mutation state
-            // We track even if the map doesn't exist to ensure correctness
             #track_modification
-            let Some(map) = self.typed_mut().find_lazy_mut(#extractor) else {
-                return None;
-            };
-            map.remove(key)
+            self.typed_mut().find_lazy_mut(#extractor).map(|map| map.remove(key)).flatten()
         }
     } else {
         quote! {
-            // Track before mutation to ensure snapshot captures pre-mutation state
             #track_modification
             #mut_expr.remove(key)
         }
@@ -2051,10 +2039,7 @@ fn generate_automap_ops(field: &FieldInfo) -> TokenStream {
         quote! {
             // Track before mutation to ensure snapshot captures pre-mutation state
             #track_modification
-            let Some(map) = self.typed_mut().find_lazy_mut(#extractor) else {
-                return None;
-            };
-            map.remove(key)
+            self.typed_mut().find_lazy_mut(#extractor).map(|map| map.remove(key)).flatten()
         }
     } else {
         quote! {

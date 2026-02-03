@@ -1163,11 +1163,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         let task_snapshots = snapshot
             .into_iter()
             .filter_map(|iter| {
-                let mut iter = iter
-                    .filter(|item| {
-                        item.meta.is_some() || item.data.is_some() || item.task_type.is_some()
-                    })
-                    .peekable();
+                let mut iter = iter.filter(|item| !item.is_empty()).peekable();
                 iter.peek().is_some().then_some(iter)
             })
             .collect::<Vec<_>>();
