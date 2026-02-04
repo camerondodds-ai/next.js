@@ -214,7 +214,7 @@ const FILES = {
       })
     })
 
-    describe('build output API - builder', () => {
+    describe.each(['builder', 'adapter'])('build output API - %s', (mode) => {
       const { next } = nextTestSetup({
         files: {
           // A mock file to be able to run `vercel build` without logging in
@@ -232,6 +232,12 @@ const FILES = {
           },
         },
         buildCommand: 'pnpm vercel build',
+        env:
+          mode === 'adapter'
+            ? {
+                NEXT_ENABLE_ADAPTER: '1',
+              }
+            : undefined,
         skipStart: true,
         skipDeployment: true,
       })
